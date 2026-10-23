@@ -80,39 +80,117 @@ function pathBlockFix(
     warning,
   };
 }
+
 const PINNED_NOTE =
   "Points at one pinned nvm version, so it goes stale when the default Node changes. " +
   "For a stable link: add `export NVM_SYMLINK_CURRENT=true` to ~/.bashrc, run `nvm use default`, " +
   "then link to ~/.nvm/current/bin/<tool> instead. (Not verified: nvm's README warns about races between terminal tabs.)";
+
+export interface LinkCandidate {
+  name: string;
+  source: string;
+}
+
+export interface ProposedLinks {
+  links: LinkSpec[];
+  commands: string[];
+  /** Names skipped because /usr/local/bin already has an entry (including dangling). */
+  occupied: string[];
+  /** Names skipped because the source path is missing. */
+  missingSource: string[];
+  pinned: boolean;
+}
+
+export interface ProposeLinksOptions {
+  /** Names already proposed earlier in the same plan. */
+  taken?: ReadonlySet<string>;
+  /**
+   * When true (npm globals), skip names whose source path is gone.
+   * Tool rows leave this false: the scan already named a linuxCandidate.
+   */
+  requireSource?: boolean;
+}
+
+/**
+ * One policy for every symlink proposal: never -f, prefer ~/.nvm/current, skip occupied names.
+ */
+export function proposeLinks(
+  entries: readonly LinkCandidate[],
+  ctx: Ctx,
+  options: ProposeLinksOptions = {},
+): ProposedLinks {
+  const taken = options.taken ?? new Set();
+  const requireSource = options.requireSource === true;
+  const links: LinkSpec[] = [];
+  const commands: string[] = [];
+  const occupied: string[] = [];
+  const missingSource: string[] = [];
+  let pinned = false;
+
+  for (const entry of entries) {
+    if (taken.has(entry.name)) continue;
+    const link = posix.join(LINK_DIR, entry.name);
+    if (requireSource && !ctx.fs.exists(entry.source)) {
+      missingSource.push(entry.name);
+      continue;
+    }
+    if (ctx.fs.entryExists(link)) {
+      occupied.push(ctx.fs.exists(link) ? entry.name : `${entry.name} (dangling)`);
+      continue;
+    }
+    const { target, pinned: isPinned } = stableTarget(entry.source, entry.name, ctx);
+    pinned = pinned || isPinned;
+    commands.push(`sudo ln -s '${target}' ${link}`);
+    links.push({ name: entry.name, link, target });
+  }
+
+  return { links, commands, occupied, missingSource, pinned };
+}
+
+/**
+ * Shared warning text for every symlink proposal. `skipOverride: null` means "no skip line"
+ * (npm globals folds occupied+missing into one sentence when present). Omit `skipOverride`
+ * to use the default occupied / missing-source lines.
+ */
+function linkProposalNotes(
+  proposed: ProposedLinks,
+  opts: { lead?: string[]; trailer: string; skipOverride?: string | null },
+): string {
+  const notes: string[] = [...(opts.lead ?? [])];
+  if (opts.skipOverride !== undefined) {
+    // npm-globals: skip line, then pinned note, then trailer.
+    if (opts.skipOverride !== null) notes.push(opts.skipOverride);
+    if (proposed.pinned) notes.push(PINNED_NOTE);
+  } else {
+    // tool symlink: pinned note, then occupied / missing-source lines, then trailer.
+    if (proposed.pinned) notes.push(PINNED_NOTE);
+    if (proposed.occupied.length > 0) {
+      notes.push(
+        `Left alone because ${LINK_DIR} already has ${proposed.occupied.join(", ")}. Check them by hand; this tool never proposes -f.`,
+      );
+    }
+    if (proposed.missingSource.length > 0) {
+      notes.push(
+        `Not linked (the source is gone): ${proposed.missingSource.join(", ")}. This tool never proposes -f.`,
+      );
+    }
+  }
+  if (opts.trailer.length > 0) notes.push(opts.trailer);
+  return notes.join(" ");
+}
 
 function symlinkFix(rows: ToolRow[], ctx: Ctx): Fix | null {
   // An `ok` row is already Linux in every view; its npm globals are handled separately.
   const linkable = rows.filter((r) => r.linuxCandidate !== null && r.status !== "ok");
   if (linkable.length === 0) return null;
 
-  const commands: string[] = [];
-  const links: LinkSpec[] = [];
-  const skipped: string[] = [];
-  let pinned = false;
-  for (const row of linkable) {
-    const link = posix.join(LINK_DIR, row.tool);
-    if (ctx.fs.entryExists(link)) {
-      skipped.push(ctx.fs.exists(link) ? row.tool : `${row.tool} (dangling)`);
-      continue;
-    }
-    const { target, pinned: isPinned } = stableTarget(row.linuxCandidate!, row.tool, ctx);
-    pinned = pinned || isPinned;
-    commands.push(`sudo ln -s '${target}' ${link}`);
-    links.push({ name: row.tool, link, target });
+  const proposed = proposeLinks(
+    linkable.map((r) => ({ name: r.tool, source: r.linuxCandidate! })),
+    ctx,
+  );
+  if (proposed.commands.length === 0 && proposed.occupied.length === 0 && proposed.missingSource.length === 0) {
+    return null;
   }
-
-  const notes: string[] = [];
-  if (pinned) notes.push(PINNED_NOTE);
-  if (skipped.length > 0) {
-    notes.push(`Left alone because ${LINK_DIR} already has ${skipped.join(", ")}. Check them by hand; this tool never proposes -f.`);
-  }
-  if (commands.length === 0 && notes.length === 0) return null;
-  notes.push("Printed, not run. Needs sudo. Fixes every launch type, including spawn with no shell.");
 
   return {
     order: 2,
@@ -122,9 +200,11 @@ function symlinkFix(rows: ToolRow[], ctx: Ctx): Fix | null {
     leavesBroken: [],
     file: null,
     content: null,
-    commands,
-    links,
-    warning: notes.join(" "),
+    commands: proposed.commands,
+    links: proposed.links,
+    warning: linkProposalNotes(proposed, {
+      trailer: "Printed, not run. Needs sudo. Fixes every launch type, including spawn with no shell.",
+    }),
   };
 }
 
@@ -145,34 +225,18 @@ function npmGlobalsFixes(info: NpmPrefixInfo, taken: ReadonlySet<string>, ctx: C
   }
   if (info.view !== "exec") return [];
 
-  const commands: string[] = [];
-  const links: LinkSpec[] = [];
-  const blocked: string[] = [];
-  let pinned = false;
-  for (const name of info.unlinked.filter((n) => !taken.has(n))) {
-    const link = posix.join(LINK_DIR, name);
-    const source = posix.join(info.binDir, name);
-    if (ctx.fs.entryExists(link) || !ctx.fs.exists(source)) {
-      blocked.push(name);
-      continue;
-    }
-    const { target, pinned: isPinned } = stableTarget(source, name, ctx);
-    pinned = pinned || isPinned;
-    commands.push(`sudo ln -s '${target}' ${link}`);
-    links.push({ name, link, target });
-  }
+  const proposed = proposeLinks(
+    info.unlinked.map((name) => ({ name, source: posix.join(info.binDir!, name) })),
+    ctx,
+    { taken, requireSource: true },
+  );
 
-  const notes = [
+  const lead = [
     `${where}. A PATH block cannot help: sh -c, bash -c, wsl.exe -e and spawn read no startup file. The fix is a link in ${LINK_DIR}, which exec already searches.`,
   ];
-  if (info.unlinked.length === 0) notes.push(`Could not list ${info.binDir}; link its entries by hand.`);
-  if (blocked.length > 0) {
-    notes.push(`Not linked (name taken, or the source is gone): ${blocked.join(", ")}. This tool never proposes -f.`);
-  }
-  if (pinned) notes.push(PINNED_NOTE);
-  if (links.length > 0) {
-    notes.push("Printed, not run. Needs sudo. Run it again after each `npm i -g`: new globals are not linked automatically.");
-  }
+  if (info.unlinked.length === 0) lead.push(`Could not list ${info.binDir}; link its entries by hand.`);
+  const blocked = [...proposed.occupied, ...proposed.missingSource];
+
   return [
     {
       order: 2,
@@ -182,9 +246,19 @@ function npmGlobalsFixes(info: NpmPrefixInfo, taken: ReadonlySet<string>, ctx: C
       leavesBroken: [],
       file: null,
       content: null,
-      commands,
-      links,
-      warning: notes.join(" "),
+      commands: proposed.commands,
+      links: proposed.links,
+      warning: linkProposalNotes(proposed, {
+        lead,
+        skipOverride:
+          blocked.length > 0
+            ? `Not linked (name taken, or the source is gone): ${blocked.join(", ")}. This tool never proposes -f.`
+            : null,
+        trailer:
+          proposed.links.length > 0
+            ? "Printed, not run. Needs sudo. Run it again after each `npm i -g`: new globals are not linked automatically."
+            : "",
+      }),
     },
   ];
 }
@@ -215,7 +289,8 @@ export function buildFixes(rows: ToolRow[], ctx: Ctx): Fix[] {
       content: null,
       commands: [],
       links: [],
-      warning: "No Linux build found anywhere. Install these inside WSL yourself (apt, nvm, fnm, volta, the vendor's native installer). This tool installs nothing.",
+      warning:
+        "No Linux build found anywhere. Install these inside WSL yourself (apt, nvm, fnm, volta, the vendor's native installer). This tool installs nothing.",
     });
   }
 
@@ -236,7 +311,9 @@ export function buildFixes(rows: ToolRow[], ctx: Ctx): Fix[] {
   const zsh = failing(broken, "exec-zsh");
   if (zsh.length > 0) {
     const file = posix.join(ctx.home, ".zshenv");
-    fixes.push(pathBlockFix("zsh", file, zsh, uniqueDirs(zsh), ctx, "zsh reads ~/.zshenv even for zsh -c. bash and sh launches do not."));
+    fixes.push(
+      pathBlockFix("zsh", file, zsh, uniqueDirs(zsh), ctx, "zsh reads ~/.zshenv even for zsh -c. bash and sh launches do not."),
+    );
   }
 
   const symlink = symlinkFix(broken, ctx);

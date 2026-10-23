@@ -234,6 +234,41 @@ Not measured: WSL1, Alpine, which launch form each harness uses, arm64 binary on
 ## For agents
 
 Paste `AGENTS-SNIPPET.md` into `AGENTS.md`, or load `skill/wsl-shadow/SKILL.md`. Both say: run `wsl-shadow --json --view=here` before trusting `node`, `npm`, `bun` or `claude`; you may suggest `wsl-shadow --apply`, but ask the user before running it, and never edit shell rc files or `/usr/local/bin` yourself.
+
+## Contributing
+
+```bash
+bun install
+bun run check-versions   # package.json and jsr.json must match
+bun run typecheck
+bun test
+bun run build
+bun run build:bin        # Linux binaries (run under WSL or Linux CI)
+```
+
+Contributor scripts under `scripts/`:
+
+| Script | Purpose |
+|---|---|
+| `copy-schema.ts` | copies `schemas/report.v1.schema.json` into `dist/` during `bun run build` |
+| `check-versions.ts` | asserts `package.json` / `jsr.json` versions match (and the git tag in release CI) |
+| `registry-has-version.ts` | exit 0/1/2 for “version already on npm or JSR” (release workflow skips publish when 0) |
+| `verify-dist.sh` | smoke-tests `dist/cli.js` and the Linux x64 binary the way a user without Bun would (run inside WSL after `build` + `build:bin`) |
+| `scan-mojibake.py` | fails if tracked text files contain UTF-8 replacement characters |
+
+```bash
+# inside WSL, after a local build
+bash scripts/verify-dist.sh
+python3 scripts/scan-mojibake.py
+```
+
+Pack / JSR dry runs before a release:
+
+```bash
+npm pack --dry-run
+bunx jsr publish --dry-run
+```
+
 ## License
 
 [AGPL-3.0-only](https://www.gnu.org/licenses/agpl-3.0.html). Free and open source. If you ship a modified version, or run a modified version as a network service, you must publish that source under the AGPL. Closed-source or proprietary commercial use needs a separate license from the author (dual licensing); ask via GitHub.

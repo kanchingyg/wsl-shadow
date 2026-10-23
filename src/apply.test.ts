@@ -613,13 +613,14 @@ describe("shipped sudo", () => {
   });
 
   test("shipped sources never install a host-root stand-in for sudo", async () => {
-    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    const { existsSync, readdirSync, readFileSync, statSync } = await import("node:fs");
     const { join } = await import("node:path");
     const root = join(import.meta.dir, "..");
     // The lab harness wrote a one-liner like: wsl.exe -d "$WSL_DISTRO_NAME" -u root -e "$@"
     const shim = /wsl(\.exe)?[^\n]{0,80}-u\s+root[^\n]{0,40}-e/;
     const hits: string[] = [];
     const walk = (dir: string) => {
+      if (!existsSync(dir)) return;
       for (const name of readdirSync(dir)) {
         if (name === "node_modules" || name === ".bun-cache") continue;
         const path = join(dir, name);
@@ -633,6 +634,7 @@ describe("shipped sudo", () => {
         if (shim.test(readFileSync(path, "utf8"))) hits.push(path);
       }
     };
+    // Always scan sources. Scan dist when present (local/CI after build); CI runs tests before build.
     walk(join(root, "src"));
     walk(join(root, "dist"));
     expect(hits).toEqual([]);

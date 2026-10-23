@@ -32,6 +32,7 @@
     "start": "bun run src/cli.ts",
     "test": "bun test",
     "typecheck": "bun x tsc",
+    "check-versions": "bun run scripts/check-versions.ts",
     "build": "bun build src/cli.ts --outfile dist/cli.js --target node && bun build src/index.ts --outfile dist/index.js --target node && bun x tsc -p tsconfig.build.json && bun run scripts/copy-schema.ts",
     "build:bin": "bun run build:bin:x64 && bun run build:bin:arm64",
     "build:bin:x64": "bun build src/cli.ts --compile --target=bun-linux-x64 --outfile dist/wsl-shadow-linux-x64",

@@ -13,17 +13,19 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - name: Install
         run: bun install --frozen-lockfile
+      - name: Versions match tag
+        run: bun run scripts/check-versions.ts
       - name: Typecheck
         run: bun run typecheck
       - name: Test
@@ -39,15 +41,39 @@ jobs:
           sha256sum wsl-shadow-linux-x64 wsl-shadow-linux-arm64 > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Publish to npm (trusted publishing + provenance)
+      - name: Publish to npm (skip if version already exists)
+        # First 0.1.0 publish is done by hand. Re-running the tag must still attach binaries.
         # No NPM_TOKEN: OIDC trusted publishing for kanchingyg/wsl-shadow (see PUBLICAR.md).
-        run: npm publish --access public --provenance
+        # registry-has-version: 0 = exists (skip), 1 = missing (publish), 2 = hard error (publish anyway).
+        run: |
+          set -euo pipefail
+          VER=$(node -p "require('./package.json').version")
+          set +e
+          bun run scripts/registry-has-version.ts npm wsl-shadow "$VER"
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -eq 0 ]; then
+            echo "npm already has wsl-shadow@${VER}; skipping publish"
+          else
+            npm publish --access public --provenance
+          fi
 
-      - name: Publish to JSR
-        run: bunx jsr publish --allow-dirty
+      - name: Publish to JSR (skip if version already exists)
+        run: |
+          set -euo pipefail
+          VER=$(node -p "require('./jsr.json').version")
+          set +e
+          bun run scripts/registry-has-version.ts jsr @kanchingyg/wsl-shadow "$VER"
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -eq 0 ]; then
+            echo "JSR already has @kanchingyg/wsl-shadow@${VER}; skipping publish"
+          else
+            bunx jsr publish --allow-dirty
+          fi
 
       - name: GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/wsl-shadow-linux-x64

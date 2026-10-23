@@ -3,6 +3,7 @@ import { posix } from "node:path";
 import { classify } from "./classify";
 import type { Ctx } from "./env";
 import { findLinuxCandidate } from "./candidates";
+import { decideStatus } from "./status";
 import type { Hit, McpConfigProbe, McpReport, McpServerRow, Status, ViewName } from "./types";
 import { LOOKUP_SCRIPT, launchFor, runLaunch } from "./views";
 
@@ -224,19 +225,6 @@ function resolveProgram(program: string, view: ViewName, ctx: Ctx): Hit {
   return { path: abs, verdict: classify(abs, ctx.mountRoot) };
 }
 
-function mcpStatus(
-  hit: Hit,
-  expectedWindows: ReadonlySet<string>,
-  program: string | null,
-  linuxCandidate: string | null,
-): Status {
-  if (program !== null && expectedWindows.has(program) && hit.verdict === "windows") {
-    return "expected-windows";
-  }
-  if (hit.verdict === "windows") return linuxCandidate ? "shadow" : "windows-only";
-  if (hit.verdict === "missing") return linuxCandidate ? "unreachable" : "missing";
-  return "ok";
-}
 
 function fixHintFor(row: Pick<McpServerRow, "status" | "view" | "program">): string | null {
   if (row.status === "ok" || row.status === "expected-windows" || row.status === "skipped") return null;
@@ -318,6 +306,7 @@ export function scanMcp(ctx: Ctx, expectedWindows: ReadonlySet<string>): McpRepo
         continue;
       }
       if (kind.view === "windows-native") {
+        // Not a measured WSL view: decideStatus needs real hits. Host-native is only expected-windows vs windows-only.
         const status: Status =
           kind.program !== null && expectedWindows.has(kind.program) ? "expected-windows" : "windows-only";
         const row: McpServerRow = {
@@ -357,8 +346,9 @@ export function scanMcp(ctx: Ctx, expectedWindows: ReadonlySet<string>): McpRepo
       }
 
       const hit = resolveProgram(program, kind.view, ctx);
-      const linuxCandidate = findLinuxCandidate(program, { [kind.view]: hit }, ctx);
-      const finalStatus = mcpStatus(hit, expectedWindows, program, linuxCandidate);
+      const hits = { [kind.view]: hit };
+      const linuxCandidate = findLinuxCandidate(program, hits, ctx);
+      const finalStatus = decideStatus(program, hits, linuxCandidate, expectedWindows).status;
       const row: McpServerRow = {
         configPath: path,
         source: spec.source,
