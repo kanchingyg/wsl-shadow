@@ -12,6 +12,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -19,8 +22,29 @@ jobs:
           bun-version: "1.4.2"
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+
+      - name: Upgrade npm for trusted publishing
+        # Trusted publishing (OIDC, no NPM_TOKEN) needs npm >= 11.5.1. Node 22 ships older npm.
+        run: |
+          set -euo pipefail
+          npm install -g npm@latest
+          npm -v
+
+      - name: Require npm >= 11.5.1 for trusted publishing
+        run: |
+          set -euo pipefail
+          VER=$(npm -v)
+          echo "npm $VER"
+          node -e '
+            const v = process.argv[1].split(".").map(Number);
+            const ok = v[0] > 11 || (v[0] === 11 && (v[1] > 5 || (v[1] === 5 && v[2] >= 1)));
+            if (!ok) {
+              console.error(`npm ${process.argv[1]} cannot do trusted publishing (needs >= 11.5.1). Refusing to publish.`);
+              process.exit(1);
+            }
+          ' "$VER"
 
       - name: Install
         run: bun install --frozen-lockfile
@@ -42,7 +66,6 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Publish to npm (skip if version already exists)
-        # First 0.1.0 publish is done by hand. Re-running the tag must still attach binaries.
         # No NPM_TOKEN: OIDC trusted publishing for kanchingyg/wsl-shadow (see PUBLICAR.md).
         # registry-has-version: 0 = exists (skip), 1 = missing (publish), 2 = hard error (publish anyway).
         run: |
