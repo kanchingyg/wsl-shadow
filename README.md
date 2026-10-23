@@ -1,5 +1,8 @@
 # wsl-shadow
 
+[![npm](https://img.shields.io/npm/v/wsl-shadow)](https://www.npmjs.com/package/wsl-shadow)
+[![JSR](https://jsr.io/badges/@kanchingyg/wsl-shadow)](https://jsr.io/@kanchingyg/wsl-shadow)
+
 ```text
 ┌─ wsl ───────────────────────────────────────────────┐
 │ alex@dev:~$ command -v npm                          │
@@ -57,18 +60,20 @@ Reported elsewhere:
 
 Run it inside WSL. Prefer the Linux binary or `node dist/cli.js`: `bunx` / `npx` inside WSL can resolve to the Windows Bun or npm.
 
+[npm](https://www.npmjs.com/package/wsl-shadow):
+
 ```bash
-# npm (after publish)
-npm i -g wsl-shadow
-# or once
-npx wsl-shadow --json
+bun add wsl-shadow
+npm i wsl-shadow
+```
 
-# Bun
-bunx wsl-shadow --json
+[JSR](https://jsr.io/@kanchingyg/wsl-shadow):
 
-# JSR (library)
+```bash
 bunx jsr add @kanchingyg/wsl-shadow
+```
 
+```bash
 # Release binary (no Node required)
 # Download wsl-shadow-linux-x64 or wsl-shadow-linux-arm64 from the GitHub Release,
 # chmod +x it, put it on PATH (for example /usr/local/bin/wsl-shadow).
