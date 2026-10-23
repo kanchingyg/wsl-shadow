@@ -1,0 +1,27 @@
+{
+  "name": "wsl-shadow",
+  "version": "0.1.0",
+  "description": "Shows which program an AI agent will run for node, npm, bun and friends under WSL, compared with your terminal.",
+  "type": "module",
+  "bin": { "wsl-shadow": "dist/cli.js" },
+  "files": ["dist/cli.js", "README.md", "skill"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "test": "bun test",
+    "build": "bun build src/cli.ts --outfile dist/cli.js --target node",
+    "build:bin": "bun run build:bin:x64 && bun run build:bin:arm64",
+    "build:bin:x64": "bun build src/cli.ts --compile --target=bun-linux-x64 --outfile dist/wsl-shadow-linux-x64",
+    "build:bin:arm64": "bun build src/cli.ts --compile --target=bun-linux-arm64 --outfile dist/wsl-shadow-linux-arm64",
+    "prepack": "bun run build"
+  },
+  "keywords": ["wsl", "wsl2", "path", "agents", "npm", "diagnostics"],
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "Augusto Cerrutti (https://github.com/kanchingyg)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kanchingyg/wsl-shadow.git"
+  },
+  "bugs": "https://github.com/kanchingyg/wsl-shadow/issues",
+  "homepage": "https://github.com/kanchingyg/wsl-shadow#readme"
+}

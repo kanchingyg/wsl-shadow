@@ -1,0 +1,20 @@
+dist/
+node_modules/
+bun-linux-*
+
+# Lab notes from this machine. They name the real WSL user and Windows profile.
+HANDOFF-CURSOR.md
+PRUEBA-WSL.md
+INVESTIGACION-WSL.md
+LIMITES-Y-CHECKS.md
+FINDINGS.md
+FIRE-TEST.md
+VIABILIDAD.md
+PRODUCT.md
+phase0.sh
+install-bun-wsl.sh
+verify-dist.sh
+parse-wsl-doctor.sh
+probe.sh
+mise-doctor.sh
+shadow-spike.sh
