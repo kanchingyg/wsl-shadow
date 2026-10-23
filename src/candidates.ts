@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { posix } from "node:path";
 import { classify } from "./classify";
 import type { Ctx } from "./env";

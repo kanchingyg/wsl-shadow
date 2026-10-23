@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 export const TOOLS = [
   "node",
   "npm",
@@ -16,8 +17,11 @@ export const TOOLS = [
   "cursor",
 ] as const;
 
+/** Tools whose version strings matter for the drift check. */
+export const VERSION_TOOLS: ReadonlySet<string> = new Set(["node", "npm", "bun"]);
+
 /** Programs that are meant to be the Windows build. Informational only. */
-export const EXPECTED_WINDOWS: ReadonlySet<string> = new Set(["cursor", "code"]);
+export const DEFAULT_EXPECTED_WINDOWS: ReadonlySet<string> = new Set(["cursor", "code"]);
 
 /** Fallback text when no probe could measure the consequence. */
 export const CONSEQUENCES: Record<string, string> = {

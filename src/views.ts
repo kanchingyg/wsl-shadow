@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { classify, parseTable } from "./classify";
 import type { Ctx } from "./env";
 import type { Hit, ViewInfo, ViewName } from "./types";

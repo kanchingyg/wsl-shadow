@@ -1,0 +1,56 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Test
+        run: bun test
+      - name: Build library and CLI
+        run: bun run build
+      - name: Build Linux binaries
+        run: bun run build:bin
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum wsl-shadow-linux-x64 wsl-shadow-linux-arm64 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish to npm (trusted publishing + provenance)
+        # No NPM_TOKEN: OIDC trusted publishing for kanchingyg/wsl-shadow (see PUBLICAR.md).
+        run: npm publish --access public --provenance
+
+      - name: Publish to JSR
+        run: bunx jsr publish --allow-dirty
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/wsl-shadow-linux-x64
+            dist/wsl-shadow-linux-arm64
+            dist/SHA256SUMS.txt
+          generate_release_notes: true

@@ -1,0 +1,21 @@
+{
+  "name": "@kanchingyg/wsl-shadow",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "exports": "./src/index.ts",
+  "publish": {
+    "include": [
+      "src/**/*.ts",
+      "schemas/report.v1.schema.json",
+      "LICENSE",
+      "README.md",
+      "jsr.json"
+    ],
+    "exclude": [
+      "src/**/*.test.ts",
+      "src/testkit.ts",
+      "src/cli.ts",
+      "src/cli-apply.ts"
+    ]
+  }
+}

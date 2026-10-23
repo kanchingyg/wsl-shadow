@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import type { Verdict } from "./types";
 
 export const DEFAULT_MOUNT_ROOT = "/mnt/";

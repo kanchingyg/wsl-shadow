@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -5,70 +6,32 @@ import { join } from "node:path";
 import { findLinuxCandidate, compareVersions, nvmDefaultBin } from "./candidates";
 import { classify, parseMountRoot, parseTable } from "./classify";
 import { createCtx, sanitizeEnv, type Ctx, type FsOps } from "./env";
+import {
+  expandPath,
+  inferLaunch,
+  parseMcpJson,
+  parseMcpToml,
+  scanMcp,
+} from "./mcp";
+import { npmBinDir, npmPrefixVisibility } from "./probes";
 import { buildReport } from "./report";
-import type { Runner, RunResult } from "./runner";
-import { TOOLS } from "./tools";
+import type { Runner } from "./runner";
+import { applyDrift, decideStatus } from "./status";
+import { DEFAULT_EXPECTED_WINDOWS, TOOLS } from "./tools";
 import type { ViewName } from "./types";
-import { LOOKUP_SCRIPT } from "./views";
+import { NPM_WIN, NVM_BIN, fakeFs, fakeRunner, makeCtx } from "./testkit";
 
-const WSL_EXE = "/mnt/c/Windows/System32/wsl.exe";
-const NODE_WIN = "/mnt/c/Program Files/nodejs/node";
-const NPM_WIN = "/mnt/c/Program Files/nodejs/npm";
-const NVM_BIN = "/home/u/.nvm/versions/node/v22.1.0/bin";
-
-type Tables = Partial<Record<ViewName, Record<string, string>>>;
-
-function ok(stdout: string): RunResult {
-  return { stdout, stderr: "", code: 0, timedOut: false, error: null };
-}
-
-/** Answers lookups and probes per view. `probes` is keyed "view:command". */
-function fakeRunner(tables: Tables, probes: Record<string, string> = {}): Runner {
-  return {
-    run(command, args) {
-      const sep = args.indexOf("_");
-      const script = args[sep - 1] ?? "";
-      const rest = args.slice(sep + 1);
-      let view: ViewName;
-      if (command === WSL_EXE) {
-        const shell = args[3];
-        view = shell === "bash" ? "login" : shell === "zsh" ? "exec-zsh" : "exec";
-      } else if (command === "sh") view = "here";
-      else view = "interactive";
-
-      if (script === LOOKUP_SCRIPT) {
-        const table = tables[view] ?? {};
-        return ok(rest.map((t) => `${t}\t${table[t] ?? ""}\n`).join(""));
-      }
-      const out = probes[`${view}:${rest.join(" ")}`];
-      return out === undefined ? { ...ok(""), code: 1 } : ok(`${out}\n`);
-    },
-  };
-}
-
-function fakeFs(files: string[] = [], dirs: Record<string, string[]> = {}, texts: Record<string, string> = {}): FsOps {
-  const set = new Set(files);
-  return {
-    exists: (p) => set.has(p),
-    readDir: (p) => dirs[p] ?? [],
-    readText: (p) => texts[p] ?? null,
-  };
-}
-
-function makeCtx(over: Partial<Ctx>): Ctx {
-  return createCtx({
-    home: "/home/u",
-    distro: "Ubuntu",
-    shell: "/bin/bash",
-    mountRoot: "/mnt/",
-    wslExe: WSL_EXE,
-    env: {},
-    fs: fakeFs(),
-    ...over,
+const run = (
+  ctx: Ctx,
+  required: string[] = [],
+  extra: { expectWindows?: string[]; mcp?: boolean; views?: ViewName[] | null } = {},
+) =>
+  buildReport(ctx, {
+    required,
+    views: extra.views ?? null,
+    expectWindows: extra.expectWindows ?? [],
+    mcp: extra.mcp ?? false,
   });
-}
-
-const run = (ctx: Ctx, required: string[] = []) => buildReport(ctx, { required, views: null });
 const row = (report: ReturnType<typeof run>, tool: string) => report.rows.find((r) => r.tool === tool)!;
 
 describe("classify", () => {
@@ -203,10 +166,105 @@ describe("statuses", () => {
     expect(report.exitCode).toBe(0);
   });
 
-  test("ok when every view resolves to Linux", () => {
+  test("--expect-windows turns claude from windows-only into expected-windows", () => {
+    const claude = "/mnt/c/Users/a/AppData/Roaming/npm/claude";
+    const ctx = makeCtx({
+      runner: fakeRunner({ interactive: { claude }, login: { claude }, exec: { claude }, here: { claude } }),
+    });
+    expect(row(run(ctx), "claude").status).toBe("windows-only");
+    expect(run(ctx).exitCode).toBe(1);
+    const report = run(ctx, [], { expectWindows: ["claude"] });
+    expect(row(report, "claude").status).toBe("expected-windows");
+    expect(report.exitCode).toBe(0);
+  });
+
+  test("ok when every view resolves to Linux with the same version", () => {
     const git = { git: "/usr/bin/git" };
-    const ctx = makeCtx({ runner: fakeRunner({ interactive: git, login: git, exec: git, here: git }) });
+    const node = { node: `${NVM_BIN}/node` };
+    const ctx = makeCtx({
+      runner: fakeRunner(
+        {
+          interactive: { ...git, ...node },
+          login: { ...git, ...node },
+          exec: { ...git, ...node },
+          here: { ...git, ...node },
+        },
+        {
+          "interactive:node --version": "v22.1.0",
+          "login:node --version": "v22.1.0",
+          "exec:node --version": "v22.1.0",
+          "here:node --version": "v22.1.0",
+        },
+      ),
+    });
     expect(row(run(ctx), "git").status).toBe("ok");
+    expect(row(run(ctx), "node").status).toBe("ok");
+  });
+
+  test("drift when Linux paths agree in kind but versions differ", () => {
+    const ctx = makeCtx({
+      runner: fakeRunner(
+        {
+          interactive: { node: `${NVM_BIN}/node` },
+          login: { node: "/usr/local/bin/node" },
+          exec: { node: "/usr/local/bin/node" },
+          here: { node: `${NVM_BIN}/node` },
+        },
+        {
+          "interactive:node --version": "v22.1.0",
+          "login:node --version": "v20.5.0",
+          "exec:node --version": "v20.5.0",
+          "here:node --version": "v22.1.0",
+        },
+      ),
+    });
+    const node = row(run(ctx), "node");
+    expect(node.status).toBe("drift");
+    expect(node.consequence).toContain("v22.1.0");
+    expect(node.consequence).toContain("v20.5.0");
+    expect(run(ctx).exitCode).toBe(1);
+  });
+});
+
+describe("applyDrift", () => {
+  test("keeps ok when versions match or are unknown", () => {
+    expect(applyDrift("ok", [{ view: "exec", version: "v22" }, { view: "login", version: "v22" }])).toBe("ok");
+    expect(applyDrift("ok", [{ view: "exec", version: null }])).toBe("ok");
+    expect(applyDrift("shadow", [{ view: "exec", version: "v1" }, { view: "login", version: "v2" }])).toBe("shadow");
+  });
+});
+
+describe("npm prefix visibility", () => {
+  test("npmBinDir appends /bin unless prefix already ends with it", () => {
+    expect(npmBinDir("/home/u/.nvm/versions/node/v22.1.0")).toBe("/home/u/.nvm/versions/node/v22.1.0/bin");
+    expect(npmBinDir("/usr/local/bin")).toBe("/usr/local/bin");
+  });
+  test("marks a prefix invisible when its bin dir is absent from PATH", () => {
+    const info = npmPrefixVisibility("exec", "/home/u/.nvm/versions/node/v22.1.0", "/usr/local/bin:/usr/bin");
+    expect(info.invisibleToView).toBe(true);
+    expect(info.binDir).toBe("/home/u/.nvm/versions/node/v22.1.0/bin");
+  });
+  test("report warns when npm i -g would write off the exec PATH", () => {
+    const npmPath = "/usr/local/bin/npm";
+    const ctx = makeCtx({
+      runner: fakeRunner(
+        {
+          interactive: { npm: npmPath },
+          login: { npm: npmPath },
+          exec: { npm: npmPath },
+          here: { npm: npmPath },
+        },
+        {
+          "exec:npm config get prefix": "/home/u/.nvm/versions/node/v22.1.0",
+          "exec:printenv PATH": "/usr/local/bin:/usr/bin:/bin",
+        },
+      ),
+    });
+    const npm = row(run(ctx), "npm");
+    expect(npm.status).toBe("ok");
+    expect(npm.npmPrefix?.invisibleToView).toBe(true);
+    expect(npm.consequence).toContain("not on the exec PATH");
+    expect(run(ctx).exitCode).toBe(1);
   });
 });
 
@@ -252,7 +310,12 @@ describe("views", () => {
     const ctx = makeCtx({
       mountRoot: "/win/",
       fs: fakeFs(),
-      runner: fakeRunner({ interactive: { npm: `${NVM_BIN}/npm` }, exec: { npm: winNpm }, login: { npm: winNpm }, here: {} }),
+      runner: fakeRunner({
+        interactive: { npm: `${NVM_BIN}/npm` },
+        exec: { npm: winNpm },
+        login: { npm: winNpm },
+        here: {},
+      }),
     });
     expect(row(run(ctx), "npm").status).toBe("shadow");
   });
@@ -275,6 +338,69 @@ describe("candidates", () => {
   test("finds a tool in a manager dir when no view saw it", () => {
     const ctx = makeCtx({ fs: fakeFs(["/home/u/.volta/bin/node"]) });
     expect(findLinuxCandidate("node", {}, ctx)).toBe("/home/u/.volta/bin/node");
+  });
+});
+
+describe("mcp", () => {
+  test("inferLaunch maps wsl -e sh -c to exec and bash -lc to login", () => {
+    expect(inferLaunch("wsl.exe", ["-e", "sh", "-c", "npx -y pkg"]).view).toBe("exec");
+    expect(inferLaunch("wsl.exe", ["-e", "sh", "-c", "npx -y pkg"]).program).toBe("npx");
+    expect(inferLaunch("wsl", ["bash", "-lc", "node server.js"]).view).toBe("login");
+    expect(inferLaunch("wsl", ["bash", "-lc", "node server.js"]).program).toBe("node");
+    expect(inferLaunch("npx", ["-y", "foo"]).view).toBe("windows-native");
+  });
+
+  test("parseMcpJson reads mcpServers and servers keys", () => {
+    const a = parseMcpJson(`{"mcpServers":{"x":{"command":"wsl","args":["-e","sh","-c","npm start"]}}}`);
+    expect(a).toEqual([{ name: "x", command: "wsl", args: ["-e", "sh", "-c", "npm start"] }]);
+    const b = parseMcpJson(`{"servers":{"y":{"command":"npx","args":["-y","pkg"]}}}`);
+    expect(b[0]!.command).toBe("npx");
+  });
+
+  test("parseMcpToml scrapes Codex mcp_servers tables", () => {
+    const text = `
+[mcp_servers.demo]
+command = "wsl.exe"
+args = ["-e", "bash", "-lc", "node index.js"]
+`;
+    expect(parseMcpToml(text)).toEqual([
+      { name: "demo", command: "wsl.exe", args: ["-e", "bash", "-lc", "node index.js"] },
+    ]);
+  });
+
+  test("expandPath leaves windows paths null without a Windows home", () => {
+    expect(expandPath("{winHome}/.cursor/mcp.json", "/home/u", null)).toBeNull();
+    expect(expandPath("{home}/.cursor/mcp.json", "/home/u", null)).toBe("/home/u/.cursor/mcp.json");
+  });
+
+  test("scanMcp flags a shadowed program under an exec MCP entry", () => {
+    const config = JSON.stringify({
+      mcpServers: {
+        bad: { command: "wsl.exe", args: ["-e", "sh", "-c", "npm run mcp"] },
+      },
+    });
+    const ctx = makeCtx({
+      fs: fakeFs(
+        ["/home/u/.cursor/mcp.json", `${NVM_BIN}/npm`],
+        { "/home/u/.nvm/versions/node": ["v22.1.0"] },
+        { "/home/u/.cursor/mcp.json": config, "/home/u/.nvm/alias/default": "22.1.0" },
+      ),
+      runner: fakeRunner({
+        interactive: { npm: `${NVM_BIN}/npm` },
+        login: { npm: `${NVM_BIN}/npm` },
+        exec: { npm: NPM_WIN },
+        here: { npm: `${NVM_BIN}/npm` },
+      }),
+    });
+    const mcp = scanMcp(ctx, DEFAULT_EXPECTED_WINDOWS);
+    const server = mcp.servers.find((s) => s.server === "bad")!;
+    expect(server.view).toBe("exec");
+    expect(server.program).toBe("npm");
+    expect(server.status).toBe("shadow");
+    expect(server.fixHint).not.toBeNull();
+    const report = run(ctx, [], { mcp: true });
+    expect(report.mcp).not.toBeNull();
+    expect(report.exitCode).toBe(1);
   });
 });
 
@@ -302,11 +428,6 @@ describe("fixes", () => {
     expect(block.content).toContain("# >>> wsl-shadow >>>");
     expect(block.content).toContain('export PATH="$HOME/.nvm/versions/node/v22.1.0/bin:$PATH"');
     expect(block.warning).toContain("nvm");
-  });
-  test("the symlink is the exact command and covers exec", () => {
-    const link = run(shadowed()).fixes[1]!;
-    expect(link.commands).toEqual([`sudo ln -s '${NVM_BIN}/npm' /usr/local/bin/npm`]);
-    expect(link.fixesViews).toContain("exec");
   });
   test("every proposal names the views it leaves broken", () => {
     const [block, link] = run(shadowed()).fixes;
@@ -354,7 +475,12 @@ describe("fixes", () => {
   });
   test("windows-only tools get no appendWindowsPath proposal, because it would only hide them", () => {
     const ctx = makeCtx({
-      runner: fakeRunner({ interactive: { npm: NPM_WIN }, login: { npm: NPM_WIN }, exec: { npm: NPM_WIN }, here: {} }),
+      runner: fakeRunner({
+        interactive: { npm: NPM_WIN },
+        login: { npm: NPM_WIN },
+        exec: { npm: NPM_WIN },
+        here: {},
+      }),
     });
     expect(run(ctx).fixes.map((f) => f.kind)).toEqual(["install"]);
   });
@@ -363,7 +489,12 @@ describe("fixes", () => {
   });
   test("tools with no Linux build get an install note, not a path", () => {
     const ctx = makeCtx({
-      runner: fakeRunner({ interactive: { npm: NPM_WIN }, login: { npm: NPM_WIN }, exec: { npm: NPM_WIN }, here: {} }),
+      runner: fakeRunner({
+        interactive: { npm: NPM_WIN },
+        login: { npm: NPM_WIN },
+        exec: { npm: NPM_WIN },
+        here: {},
+      }),
     });
     expect(run(ctx).fixes[0]!.kind).toBe("install");
   });
@@ -380,12 +511,23 @@ describe("json shape", () => {
     const parsed = JSON.parse(JSON.stringify(report));
     expect(parsed.schemaVersion).toBe(1);
     expect(Object.keys(parsed).sort()).toEqual(
-      ["distro", "exitCode", "fixes", "insideWsl", "mountRoot", "rows", "schemaVersion", "views"].sort(),
+      ["distro", "exitCode", "fixes", "insideWsl", "mcp", "mountRoot", "rows", "schemaVersion", "views"].sort(),
     );
     expect(Object.keys(parsed.rows[0]).sort()).toEqual(
-      ["consequence", "failingViews", "hits", "linuxCandidate", "probes", "status", "tool"].sort(),
+      ["consequence", "failingViews", "hits", "linuxCandidate", "npmPrefix", "probes", "status", "tool", "versions"].sort(),
     );
     expect(parsed.rows).toHaveLength(TOOLS.length);
+    expect(parsed.mcp).toBeNull();
+  });
+});
+
+describe("decideStatus expected set", () => {
+  test("uses the passed expected-windows set", () => {
+    const hits = {
+      interactive: { path: "/mnt/c/x/claude", verdict: "windows" as const },
+    };
+    expect(decideStatus("claude", hits, null, new Set()).status).toBe("windows-only");
+    expect(decideStatus("claude", hits, null, new Set(["claude"])).status).toBe("expected-windows");
   });
 });
 
@@ -398,17 +540,22 @@ describe.skipIf(process.platform === "win32")("integration (real sh)", () => {
       const linDir = join(base, "bin");
       mkdirSync(winDir, { recursive: true });
       mkdirSync(linDir, { recursive: true });
-      for (const [dir, name] of [[winDir, "npm"], [linDir, "git"]] as const) {
+      for (const [dir, name] of [
+        [winDir, "npm"],
+        [linDir, "git"],
+      ] as const) {
         const file = join(dir, name);
         writeFileSync(file, "#!/bin/sh\necho stub\n");
         chmodSync(file, 0o755);
       }
       const env = { PATH: `${winDir}:${linDir}:/usr/bin:/bin` };
-      // Only paths inside the temp dir exist, so the machine's own /usr/local/bin can't change the result.
       const sandboxFs: FsOps = {
         exists: (p) => p.startsWith(base) && existsSync(p),
         readDir: () => [],
         readText: () => null,
+        entryExists: (p) => p.startsWith(base) && existsSync(p),
+        readLink: () => null,
+        stat: () => null,
       };
       const ctx = createCtx({
         env,
@@ -419,7 +566,7 @@ describe.skipIf(process.platform === "win32")("integration (real sh)", () => {
         shell: "/bin/sh",
         home: base,
       });
-      const report = buildReport(ctx, { required: [], views: ["here"] });
+      const report = buildReport(ctx, { required: [], views: ["here"], expectWindows: [], mcp: false });
       const rows = Object.fromEntries(report.rows.map((r) => [r.tool, r.status]));
       expect(rows.npm).toBe("windows-only");
       expect(rows.git).toBe("ok");

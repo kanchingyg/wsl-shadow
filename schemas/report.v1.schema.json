@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kanchingyg/wsl-shadow/schemas/report.v1.schema.json",
+  "title": "wsl-shadow Report",
+  "description": "Output of `wsl-shadow --json` (schemaVersion 1). Mirrors the Report type in src/types.ts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "insideWsl",
+    "distro",
+    "mountRoot",
+    "views",
+    "rows",
+    "mcp",
+    "fixes",
+    "exitCode"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "insideWsl": { "type": "boolean" },
+    "distro": { "type": ["string", "null"] },
+    "mountRoot": { "type": "string", "minLength": 1 },
+    "views": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/viewInfo" }
+    },
+    "rows": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/toolRow" }
+    },
+    "mcp": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/mcpReport" }]
+    },
+    "fixes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fix" }
+    },
+    "exitCode": { "type": "integer", "enum": [0, 1, 2] }
+  },
+  "$defs": {
+    "viewName": {
+      "type": "string",
+      "enum": ["interactive", "login", "exec", "exec-zsh", "here"]
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["linux", "windows", "missing"]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "shadow",
+        "windows-only",
+        "unreachable",
+        "drift",
+        "missing",
+        "expected-windows",
+        "unmeasured"
+      ]
+    },
+    "viewInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "available", "reason"],
+      "properties": {
+        "name": { "$ref": "#/$defs/viewName" },
+        "available": { "type": "boolean" },
+        "reason": { "type": ["string", "null"] }
+      }
+    },
+    "hit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "verdict"],
+      "properties": {
+        "path": { "type": ["string", "null"] },
+        "verdict": { "$ref": "#/$defs/verdict" }
+      }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["view", "command", "output", "windows"],
+      "properties": {
+        "view": { "$ref": "#/$defs/viewName" },
+        "command": { "type": "string" },
+        "output": { "type": ["string", "null"] },
+        "windows": { "type": "boolean" }
+      }
+    },
+    "versionHit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["view", "version"],
+      "properties": {
+        "view": { "$ref": "#/$defs/viewName" },
+        "version": { "type": ["string", "null"] }
+      }
+    },
+    "npmPrefixInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["view", "prefix", "binDir", "invisibleToView", "unlinked"],
+      "properties": {
+        "view": { "$ref": "#/$defs/viewName" },
+        "prefix": { "type": ["string", "null"] },
+        "binDir": { "type": ["string", "null"] },
+        "invisibleToView": { "type": "boolean" },
+        "unlinked": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "toolRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "status",
+        "hits",
+        "failingViews",
+        "linuxCandidate",
+        "probes",
+        "versions",
+        "npmPrefix",
+        "consequence"
+      ],
+      "properties": {
+        "tool": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/status" },
+        "hits": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/hit" }
+        },
+        "failingViews": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/viewName" }
+        },
+        "linuxCandidate": { "type": ["string", "null"] },
+        "probes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/probe" }
+        },
+        "versions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/versionHit" }
+        },
+        "npmPrefix": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/npmPrefixInfo" }]
+        },
+        "consequence": { "type": ["string", "null"] }
+      }
+    },
+    "linkSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "link", "target"],
+      "properties": {
+        "name": { "type": "string" },
+        "link": { "type": "string" },
+        "target": { "type": "string" }
+      }
+    },
+    "fix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order",
+        "kind",
+        "tools",
+        "fixesViews",
+        "leavesBroken",
+        "file",
+        "content",
+        "commands",
+        "links",
+        "warning"
+      ],
+      "properties": {
+        "order": { "type": "integer" },
+        "kind": {
+          "type": "string",
+          "enum": ["install", "path-block", "symlink", "harness", "last-resort"]
+        },
+        "tools": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "fixesViews": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/viewName" }
+        },
+        "leavesBroken": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/viewName" }
+        },
+        "file": { "type": ["string", "null"] },
+        "content": { "type": ["string", "null"] },
+        "commands": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "links": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/linkSpec" }
+        },
+        "warning": { "type": ["string", "null"] }
+      }
+    },
+    "mcpConfigProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "source", "side", "confidence", "present", "parseError"],
+      "properties": {
+        "path": { "type": "string" },
+        "source": { "type": "string" },
+        "side": { "type": "string", "enum": ["linux", "windows"] },
+        "confidence": {
+          "type": "string",
+          "enum": ["verified", "reported", "unverified"]
+        },
+        "present": { "type": "boolean" },
+        "parseError": { "type": ["string", "null"] }
+      }
+    },
+    "mcpServerRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configPath",
+        "source",
+        "server",
+        "command",
+        "args",
+        "view",
+        "program",
+        "resolvedPath",
+        "status",
+        "consequence",
+        "fixHint"
+      ],
+      "properties": {
+        "configPath": { "type": "string" },
+        "source": { "type": "string" },
+        "server": { "type": "string" },
+        "command": { "type": "string" },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "view": {
+          "oneOf": [
+            { "$ref": "#/$defs/viewName" },
+            { "type": "string", "enum": ["windows-native", "skipped"] }
+          ]
+        },
+        "program": { "type": ["string", "null"] },
+        "resolvedPath": { "type": ["string", "null"] },
+        "status": {
+          "oneOf": [
+            { "$ref": "#/$defs/status" },
+            { "type": "string", "enum": ["skipped", "unavailable"] }
+          ]
+        },
+        "consequence": { "type": ["string", "null"] },
+        "fixHint": { "type": ["string", "null"] }
+      }
+    },
+    "mcpReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configs", "servers"],
+      "properties": {
+        "configs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/mcpConfigProbe" }
+        },
+        "servers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/mcpServerRow" }
+        }
+      }
+    }
+  }
+}

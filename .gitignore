@@ -1,6 +1,7 @@
 dist/
 node_modules/
 bun-linux-*
+*.tgz
 
 # Lab notes from this machine. They name the real WSL user and Windows profile.
 HANDOFF-CURSOR.md
@@ -18,3 +19,10 @@ parse-wsl-doctor.sh
 probe.sh
 mise-doctor.sh
 shadow-spike.sh
+LAB-MCP.md
+capture-mcp.sh
+LICENSE.raw
+LICENSE.body
+LICENSE.tmp
+LAB-APPLY.md
+PUBLICAR.md
