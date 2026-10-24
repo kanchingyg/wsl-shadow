@@ -1,7 +1,7 @@
 {
   "name": "wsl-shadow",
-  "version": "0.1.2",
-  "description": "Shows which program an AI agent will run for node, npm, bun and friends under WSL, compared with your terminal.",
+  "version": "0.1.4",
+  "description": "Shows which node, npm or bun an AI agent in WSL runs next to your terminal's, and prints the fix.",
   "type": "module",
   "types": "./dist/index.d.ts",
   "exports": {

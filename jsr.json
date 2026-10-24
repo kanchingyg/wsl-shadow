@@ -1,6 +1,6 @@
 {
   "name": "@kanchingyg/wsl-shadow",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "license": "AGPL-3.0-only",
   "exports": "./src/index.ts",
   "publish": {
