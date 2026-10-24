@@ -21,15 +21,23 @@ import { posix } from "node:path";
 import { DEFAULT_MOUNT_ROOT, parseMountRoot } from "./classify";
 import { realRunner, type Runner } from "./runner";
 
+/** Mode and ownership from `lstat`, used when replacing a file in place. */
 export interface FileMeta {
+  /** Permission bits from the filesystem. */
   mode: number;
+  /** Owner user id. */
   uid: number;
+  /** Owner group id. */
   gid: number;
 }
 
+/** Read-only filesystem surface used by scans and planning. */
 export interface FsOps {
+  /** True when the path exists (follows the platform exists check). */
   exists(path: string): boolean;
+  /** Directory entries, or an empty list when the path cannot be read. */
   readDir(path: string): string[];
+  /** File contents as UTF-8, or null when the path cannot be read. */
   readText(path: string): string | null;
   /** True for any directory entry, including a symlink whose target is gone. */
   entryExists(path: string): boolean;
@@ -39,6 +47,7 @@ export interface FsOps {
   stat(path: string): FileMeta | null;
 }
 
+/** Options for {@link WritableFs.writeText}. */
 export interface WriteTextOptions {
   /** fsync the file after writing. Used for the state file. */
   sync?: boolean;
@@ -46,10 +55,15 @@ export interface WriteTextOptions {
 
 /** The only writes `--apply` and `--undo` make. Everything else in the tool is read-only. */
 export interface WritableFs extends FsOps {
+  /** Write UTF-8 text, optionally fsyncing afterward. */
   writeText(path: string, text: string, opts?: WriteTextOptions): void;
+  /** Copy a file byte for byte (used for backups). */
   copyFile(from: string, to: string): void;
+  /** Create a directory and parents. */
   mkdirp(dir: string): void;
+  /** Unlink a file or symlink. */
   remove(path: string): void;
+  /** Rename/move a path. */
   rename(from: string, to: string): void;
   /** Apply mode bits (permission mask). Best-effort on platforms that ignore them. */
   chmod(path: string, mode: number): void;
@@ -59,15 +73,25 @@ export interface WritableFs extends FsOps {
   syncDir(dir: string): void;
 }
 
+/** Runtime context for lookups: runner, fs, env, and WSL paths. */
 export interface Ctx {
+  /** How child processes are started. */
   runner: Runner;
+  /** Filesystem used for reads (and writes when it is a WritableFs). */
   fs: FsOps;
+  /** Environment variables for launches. */
   env: Record<string, string | undefined>;
+  /** Linux home directory. */
   home: string;
+  /** WSL distro name, or null outside WSL. */
   distro: string | null;
+  /** User shell path used for the interactive view. */
   shell: string;
+  /** Automount root used to classify Windows paths. */
   mountRoot: string;
+  /** Path to wsl.exe, or null when interop is off / not in WSL. */
   wslExe: string | null;
+  /** Default timeout for spawned lookups, in milliseconds. */
   timeoutMs: number;
 }
 

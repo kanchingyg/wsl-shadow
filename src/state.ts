@@ -15,19 +15,27 @@ export function upsertLinkRecord(state: AppliedState, record: AppliedLink): void
   state.links = [...state.links.filter((l) => l.link !== record.link), record];
 }
 
+/** One startup file this tool edited, recorded so `--undo` can reverse it. */
 export interface AppliedFile {
+  /** Absolute path of the edited file. */
   path: string;
+  /** True when the file already existed before the first edit. */
   existedBefore: boolean;
   /** First copy of the file from before this tool touched it. Null when it did not exist. */
   originalBackup: string | null;
   /** SHA-256 of what this tool last wrote, to tell later whether the user edited the file since. */
   writtenSha256: string;
+  /** ISO timestamp when the edit was recorded as done. */
   appliedAt: string;
 }
 
+/** One symlink this tool created under `/usr/local/bin`. */
 export interface AppliedLink {
+  /** Absolute path of the symlink. */
   link: string;
+  /** Target path recorded at apply time. */
   target: string;
+  /** ISO timestamp when the link was recorded as done. */
   appliedAt: string;
 }
 
@@ -43,46 +51,75 @@ export interface HistoryEntry {
  */
 export type PendingChange =
   | {
+      /** Pending PATH-block write. */
       kind: "block";
+      /** Absolute path being edited. */
       file: string;
+      /** SHA-256 of the intended file contents after the write. */
       intendedSha256: string;
+      /** SHA-256 before the write, or null when the file was new. */
       previousSha256: string | null;
+      /** True when the file existed before this pending change. */
       existedBefore: boolean;
+      /** Backup path taken before the write, or null. */
       originalBackup: string | null;
+      /** ISO timestamp when the pending intent was written. */
       startedAt: string;
     }
   | {
+      /** Pending symlink create. */
       kind: "link";
+      /** Absolute symlink path. */
       link: string;
+      /** Intended target path. */
       target: string;
+      /** ISO timestamp when the pending intent was written. */
       startedAt: string;
     }
   | {
+      /** Pending symlink removal (unlink) or dangling-link cleanup (prune). */
       kind: "unlink" | "prune";
+      /** Absolute symlink path. */
       link: string;
+      /** Target that must still match before removal. */
       target: string;
+      /** ISO timestamp when the pending intent was written. */
       startedAt: string;
     }
   | {
+      /** Pending undo of a file edit. */
       kind: "restore";
+      /** Absolute path being restored. */
       file: string;
+      /** How undo will reverse the file. */
       how: "restore-backup" | "remove-file" | "strip-block";
+      /** Backup to restore from, when how is restore-backup. */
       originalBackup: string | null;
+      /** True when the file existed before the original apply. */
       existedBefore: boolean;
+      /** SHA-256 before restore, or null. */
       previousSha256: string | null;
+      /** ISO timestamp when the pending intent was written. */
       startedAt: string;
     }
   | {
+      /** Pending drop of a link record that is no longer ours. */
       kind: "forget";
+      /** Absolute symlink path to forget. */
       link: string;
+      /** ISO timestamp when the pending intent was written. */
       startedAt: string;
     };
 
 /** Everything the tool created. `--undo` removes only what is listed here (after pending is settled). */
 export interface AppliedState {
+  /** State file schema version; always 1. */
   schemaVersion: 1;
+  /** Startup files this tool edited. */
   files: AppliedFile[];
+  /** Symlinks this tool created. */
   links: AppliedLink[];
+  /** Recent apply/undo history for humans. */
   history: HistoryEntry[];
   /** At most one in-flight change. Empty when idle. */
   pending: PendingChange[];
@@ -95,6 +132,7 @@ export function stateDir(home: string): string {
   return posix.join(home, ".local/state/wsl-shadow");
 }
 
+/** Absolute path of `~/.local/state/wsl-shadow/applied.json` for the given home. */
 export function statePath(home: string): string {
   return posix.join(stateDir(home), "applied.json");
 }

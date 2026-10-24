@@ -10,11 +10,11 @@ import { DEFAULT_EXPECTED_WINDOWS } from "./tools";
 import type { Fix, McpReport, Report, ToolRow, ViewName } from "./types";
 
 /**
- * Everything is injectable so a host can test against fakes. Omitted fields use the real
- * process, filesystem and environment, read when the function is called and never on import.
+ * Options for scan, resolveTool, scanMcp, planFixes, and preflight.
+ * Omitted fields use the real process, filesystem and environment, read when the function is called and never on import.
  */
 export interface ScanOptions {
-  /** Tools whose absence exits 2. */
+  /** Tools whose absence sets exitCode 2. */
   required?: string[];
   /** Limit to these views. Default: every view that applies. */
   views?: ViewName[] | null;
@@ -22,14 +22,23 @@ export interface ScanOptions {
   expectWindows?: string[];
   /** Include the MCP config scan. */
   mcp?: boolean;
+  /** Process runner. Defaults to the real spawnSync runner. */
   runner?: Runner;
+  /** Read-only filesystem. Defaults to the real filesystem. */
   fs?: FsOps;
+  /** Environment map. Defaults to `process.env` (with bun runtime shims stripped from PATH). */
   env?: Record<string, string | undefined>;
+  /** Linux home directory. Defaults to HOME or os.homedir(). */
   home?: string;
+  /** WSL distro name. Defaults to WSL_DISTRO_NAME, or null. */
   distro?: string | null;
+  /** User shell path. Defaults to SHELL or `/bin/bash`. */
   shell?: string;
+  /** Automount root for classifying Windows paths. Defaults from wsl.conf or `/mnt/`. */
   mountRoot?: string;
+  /** Path to wsl.exe, or null when unavailable. */
   wslExe?: string | null;
+  /** Per-launch timeout in milliseconds. Defaults to 10000. */
   timeoutMs?: number;
 }
 
@@ -70,6 +79,7 @@ export function planFixes(report: Report, opts: ScanOptions = {}): Fix[] {
   return buildFixes(report.rows, contextFor(opts));
 }
 
+/** Options for {@link preflight}. Extends {@link ScanOptions} with the tool list to check. */
 export interface PreflightOptions extends ScanOptions {
   /** Tools every launch must resolve to Linux. Default: node, npm. */
   tools?: string[];
@@ -80,8 +90,11 @@ export function preflight(opts: PreflightOptions = {}): PreflightResult {
   return runPreflight(opts.tools ?? DEFAULT_PREFLIGHT_TOOLS, contextFor(opts));
 }
 
+/** Options for {@link createApplyDeps}. Extends {@link ScanOptions} with writable fs and root checks. */
 export interface ApplyOptions extends ScanOptions {
+  /** Writable filesystem for apply/undo. Defaults to the real writable filesystem. */
   fs?: WritableFs;
+  /** Clock used for state and backup timestamps. Defaults to `() => new Date()`. */
   now?: () => Date;
   /** Defaults to the real uid check. */
   isRoot?: boolean;

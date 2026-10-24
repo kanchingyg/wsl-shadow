@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Public API. Importing this file runs nothing: no process, no filesystem, no exit.
+/**
+ * Library entry for wsl-shadow: scan WSL tool PATH shadowing, propose fixes, and optionally apply them.
+ * Importing this module runs nothing: no process, no filesystem, no exit, no output.
+ *
+ * @module
+ */
 export {
   createApplyDeps,
   planFixes,

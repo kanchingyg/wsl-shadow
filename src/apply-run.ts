@@ -330,6 +330,7 @@ export function runApply(plan: Plan, deps: ApplyDeps): RunResult {
   return { ok: results.every((r) => r.status !== "failed"), results };
 }
 
+/** Runs a plan from `planUndo`: restores files and removes only recorded links. */
 export function runUndo(plan: Plan, deps: ApplyDeps): RunResult {
   if (plan.refusal !== null) return { ok: false, results: [] };
   const loaded = loadSettled(deps);

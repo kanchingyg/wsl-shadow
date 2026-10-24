@@ -6,9 +6,12 @@ import { stableTarget } from "./fixes";
 import type { Hit, ViewName } from "./types";
 import { resolveView } from "./views";
 
+/** Default tool list for preflight when the caller does not pass `--require` / `tools`. */
 export const DEFAULT_PREFLIGHT_TOOLS: readonly string[] = ["node", "npm"];
 
+/** One tool that failed the preflight Linux check in the measured view. */
 export interface PreflightProblem {
+  /** Command name that failed. */
   tool: string;
   /** windows: a Windows build answers. missing: nothing answers. */
   found: "windows" | "missing";
@@ -16,6 +19,7 @@ export interface PreflightProblem {
   linuxCandidate: string | null;
 }
 
+/** Result of {@link preflight} / `runPreflight`: exit code, PATH prefix, and problems. */
 export interface PreflightResult {
   /** 0 every tool resolves to Linux. 1 fixable. 2 a tool has no Linux build anywhere. */
   exitCode: 0 | 1 | 2;
@@ -23,6 +27,7 @@ export interface PreflightResult {
   view: ViewName;
   /** Colon-joined dirs to put in front of PATH so every tool resolves to its Linux build. Empty when none. */
   pathPrefix: string;
+  /** Tools that did not resolve to Linux in the measured view. */
   problems: PreflightProblem[];
   /** Why the check could not run (view unavailable). Set together with exitCode 1. */
   error: string | null;
