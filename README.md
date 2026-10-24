@@ -1,60 +1,30 @@
 # wsl-shadow
 
+[![ci](https://github.com/kanchingyg/wsl-shadow/actions/workflows/ci.yml/badge.svg)](https://github.com/kanchingyg/wsl-shadow/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/wsl-shadow)](https://www.npmjs.com/package/wsl-shadow)
 [![JSR](https://jsr.io/badges/@kanchingyg/wsl-shadow)](https://jsr.io/@kanchingyg/wsl-shadow)
+[![license](https://img.shields.io/npm/l/wsl-shadow)](https://github.com/kanchingyg/wsl-shadow/blob/HEAD/LICENSE)
+
+wsl-shadow shows which `node`, `npm` or `bun` an AI agent in WSL runs, next to the one your terminal runs, and prints the PATH or symlink change that makes them match.
 
 ```text
-┌─ wsl ───────────────────────────────────────────────┐
-│ alex@dev:~$ command -v npm                          │
-│ /home/alex/.nvm/versions/node/v22.23.2/bin/npm      │
-│                                                     │
-│ agent (wsl.exe -e sh -c)                            │
-│ /mnt/c/Program Files/nodejs/npm                     │
-└─────────────────────────────────────────────────────┘
+┌─ your terminal: bash, interactive ───────────────────────┐
+│ reads ~/.bashrc, nvm puts its bin dir first on PATH      │
+│ $ command -v npm                                         │
+│ /home/alex/.nvm/versions/node/v22.23.2/bin/npm           │
+└──────────────────────────────────────────────────────────┘
+┌─ AI agent: wsl.exe -e sh -c ─────────────────────────────┐
+│ reads no startup file, Windows PATH entries remain       │
+│ $ command -v npm                                         │
+│ /mnt/c/Program Files/nodejs/npm                          │
+└──────────────────────────────────────────────────────────┘
 ```
-
-Your terminal and an AI agent on the same WSL distro can resolve `npm` to two different programs. wsl-shadow runs the lookup the way each of them launches a command, and prints the difference.
 
 ## The problem
 
 WSL appends the Windows PATH to every process. nvm, fnm and the rest load from `~/.bashrc`, and Ubuntu's `~/.bashrc` returns immediately when the shell is not interactive. Agents start `wsl.exe bash -lc`, `wsl.exe -e sh -c`, or a spawn with no shell. None of those read `~/.bashrc`.
 
 Linux `npm` is missing from that PATH, so `/mnt/c/Program Files/nodejs/npm` wins. `npm -v` still prints a version. `npm config get prefix` points at `C:\Users\...`, and `node` is often not found at all, because WSL will not run `node.exe` under the name `node`.
-
-| View | How an agent launches it | What that shell reads |
-|---|---|---|
-| `interactive` | your terminal | `~/.bashrc`, and `~/.profile` if it is a login |
-| `login` | `wsl.exe bash -lc`, MCP `"command": "wsl"` | `~/.profile`, unless `~/.bash_profile` or `~/.bash_login` exists |
-| `exec` | `wsl.exe -e sh -c`, `bash -c`, spawn | nothing |
-| `here` | whoever is running wsl-shadow | the PATH it inherited |
-
-## Measured output
-
-Real run on WSL2 Ubuntu with nvm and with Node also installed on Windows. User names and home paths are swapped. The `/mnt/c/Program Files/nodejs` hit and the `C:\` prefix are what the tool printed.
-
-```text
-$ wsl-shadow --view=interactive,login,exec
-
-unreachable node
-          interactive /home/alex/.nvm/versions/node/v22.23.2/bin/node
-          login       (not found)  <- fails
-          exec        (not found)  <- fails
-shadow    npm
-          interactive /home/alex/.nvm/versions/node/v22.23.2/bin/npm
-          login       /mnt/c/Program Files/nodejs/npm  <- fails
-          exec        /mnt/c/Program Files/nodejs/npm  <- fails
-          measured: `npm config get prefix` = C:\Users\alex\AppData\Roaming\npm (login)
-```
-
-A PATH block in `~/.profile` cleared `login` and left `exec` on the Windows `npm`. Symlinks in `/usr/local/bin` cleared `exec` too.
-
-Reported elsewhere:
-
-- [openai/codex#20810](https://github.com/openai/codex/issues/20810): `node` missing, `npm` under `/mnt/c/.../fnm/`.
-- [GitNexus#1220](https://github.com/abhigyanpatwari/GitNexus/issues/1220): interactive `which` is Linux; `wsl bash -lc` runs the Windows shim.
-- [Kilo#8129](https://github.com/Kilo-Org/kilocode/issues/8129): the agent shell skips `.bashrc` and gets Windows npm.
-- [pi#1756](https://github.com/badlogic/pi-mono/issues/1756): `spawnSync("npm")` and the shell `npm` disagree; `npm root -g` returns `C:\`.
-- [agent-girl f184807](https://github.com/KenKaiii/agent-girl/commit/f1848071ee26fe8f7ca1b66d6729a95681518106): the launcher detects Windows Bun and installs a Linux one.
 
 ## Install
 
@@ -88,6 +58,26 @@ bun run build:bin    # dist/wsl-shadow-linux-x64 and dist/wsl-shadow-linux-arm64
 node dist/cli.js --json
 ```
 
+## Quick start
+
+Real run on WSL2 Ubuntu with nvm and with Node also installed on Windows. User names and home paths are swapped. The `/mnt/c/Program Files/nodejs` hit and the `C:\` prefix are what the tool printed.
+
+```text
+$ wsl-shadow --view=interactive,login,exec
+
+unreachable node
+          interactive /home/alex/.nvm/versions/node/v22.23.2/bin/node
+          login       (not found)  <- fails
+          exec        (not found)  <- fails
+shadow    npm
+          interactive /home/alex/.nvm/versions/node/v22.23.2/bin/npm
+          login       /mnt/c/Program Files/nodejs/npm  <- fails
+          exec        /mnt/c/Program Files/nodejs/npm  <- fails
+          measured: `npm config get prefix` = C:\Users\alex\AppData\Roaming\npm (login)
+```
+
+A PATH block in `~/.profile` cleared `login` and left `exec` on the Windows `npm`. Symlinks in `/usr/local/bin` cleared `exec` too.
+
 ## Use
 
 ```bash
@@ -117,17 +107,26 @@ Exit `0` when every measured tool is fine. Exit `1` on `shadow`, `windows-only`,
 
 `--json` matches [schemas/report.v1.schema.json](schemas/report.v1.schema.json) (`schemaVersion: 1`). The published package also exposes it as `wsl-shadow/schema`.
 
+## How it works
+
+| View | How an agent launches it | What that shell reads |
+|---|---|---|
+| `interactive` | your terminal | `~/.bashrc`, and `~/.profile` if it is a login |
+| `login` | `wsl.exe bash -lc`, MCP `"command": "wsl"` | `~/.profile`, unless `~/.bash_profile` or `~/.bash_login` exists |
+| `exec` | `wsl.exe -e sh -c`, `bash -c`, spawn | nothing |
+| `here` | whoever is running wsl-shadow | the PATH it inherited |
+
 ## Drift and npm globals
 
 Two Linux paths are not enough. If your terminal's `node` is v22 and the `exec` launch's `node` is v20, the status is `drift` and the exit code is 1.
 
-When `npm` is already Linux, wsl-shadow runs `npm config get prefix` in that view and checks whether `$prefix/bin` is on PATH. If a symlink made `npm` visible but globals still land in an nvm folder that `exec` does not search, it warns, names the globals `exec` cannot run, and exits 1. A PATH block cannot fix that (`exec` reads no startup file); a link in `/usr/local/bin` can. `--fix` prints those links and `--apply` creates them. The warning clears once every global in that folder is reachable, and returns after the next `npm i -g` until you run `--apply` again.
+When `npm` is already Linux, wsl-shadow runs `npm config get prefix` in that view and checks whether `$prefix/bin` is on PATH. If a symlink made `npm` visible but globals still land in an nvm folder that `exec` does not search, it warns, names the globals `exec` cannot run, and exits 1. A PATH block cannot fix that (`exec` reads no startup file). A link in `/usr/local/bin` can. `--fix` prints those links and `--apply` creates them. The warning clears once every global in that folder is reachable, and returns after the next `npm i -g` until you run `--apply` again.
 
 ## MCP configs (`--mcp`)
 
 Read-only. Walks known config paths on the Linux home and under the Windows profile mount (`/mnt/c/Users/...`). Each path is marked `verified` (that client's docs), `reported` (a published guide), or `unverified` (guess).
 
-For every server whose `command` is `wsl` / `wsl.exe`, or a bare `npx` / `node` / `bun`, it picks the launch view (`login` vs `exec` vs Windows-native), resolves the program, and prints status plus a printed-only fix hint. Config files are never edited.
+For every server whose `command` is `wsl` / `wsl.exe`, or a bare `npx` / `node` / `bun`, it picks the launch view (`login` vs `exec` vs Windows-native), resolves the program, and prints status plus a printed-only fix hint.
 
 ## What `--fix` reaches
 
@@ -135,7 +134,7 @@ Each proposal names the views it fixes and the views it leaves broken. A PATH bl
 
 | Proposal | `login` | `exec` |
 |---|---|---|
-| PATH block in the login file bash actually reads | yes | **no** |
+| PATH block in the login file bash actually reads | yes | no |
 | PATH block in `~/.zshenv` | yes, on zsh | `zsh -c` only |
 | Symlink in `/usr/local/bin` | yes | yes |
 | `appendWindowsPath=false` | yes, for `shadow` | yes, for `shadow` |
@@ -150,7 +149,7 @@ A symlink to `~/.nvm/versions/node/v22.x/bin/npm` keeps serving v22 after `nvm a
 
 ## `--apply` and `--undo`
 
-`--fix` is a dry run and stays one. `--apply` prints the same plan plus the exact steps, asks you to type `apply`, and only then writes. `--yes` replaces the typed answer; without a terminal and without `--yes` it refuses.
+`--fix` is a dry run and stays one. `--apply` prints the same plan plus the exact steps, asks you to type `apply`, and only then writes. `--yes` replaces the typed answer. Without a terminal and without `--yes` it refuses.
 
 ```text
 $ wsl-shadow --apply
@@ -179,13 +178,11 @@ It changes two kinds of thing, and nothing else:
 | Symlinks | `/usr/local/bin` | `sudo ln -s`, never `-f`; a name that already exists is skipped; targets must exist and be Linux paths |
 
 - Links come from the tool proposals (`node`, `npm`, `bun`… found in a manager dir) and from the npm prefix: every global in `$(npm config get prefix)/bin` that `exec` cannot run gets a link. Run `--apply` again after `npm i -g` to link the new ones. It also removes links it made earlier that now dangle (a deleted nvm version). A dangling link it did not make is left alone.
-- `sudo` runs only for those link commands, through your normal terminal prompt. wsl-shadow never reads, caches or stores the password. It refuses to run as root. The shipped code always calls the real `sudo` binary; it does not escalate through the Windows host.
+- `sudo` runs only for those link commands, through your normal terminal prompt. wsl-shadow never reads, caches or stores the password. It refuses to run as root. The shipped code always calls the real `sudo` binary. It does not escalate through the Windows host.
 - Before each change, the intent is written to `~/.local/state/wsl-shadow/applied.json` and fsynced (`pending`). After the change lands it is marked done. If the process dies in between, the next `--apply` or `--undo` looks at the real files and either records what landed (so undo can reverse it) or drops the pending entry. Backups go under `~/.local/state/wsl-shadow/backups/`. If a file edit fails, no `sudo` runs.
 - After `--apply` and `--undo` it re-measures every view and prints before and after.
 
 `--undo` reads that state file and nothing else. It removes the links it created (only if they still point where it pointed them), and restores each edited file from the first backup. If you edited the file since, it removes only the marked block and keeps your edit. A file it created is deleted only while it is still exactly what it wrote. To revert by hand: delete the block between the markers, and `sudo rm` the links listed in `applied.json`.
-
-Never touched: `/etc/wsl.conf`, `.wslconfig`, `/etc/profile`, `/etc/environment`, `~/.bashrc`, `WSLENV`, the Windows PATH, `System32`, anything under `/mnt/<drive>/`, or anything it did not create. It never runs `wsl --shutdown` and does not install nvm, Node, Bun or `claude`.
 
 ## Library
 
@@ -209,7 +206,7 @@ if (report.exitCode !== 0) console.error(npm.status, npm.consequence);
 | `preflight(opts?)` | `{ exitCode, view, pathPrefix, problems, error }` |
 | `planApply`, `runApply`, `planUndo`, `runUndo`, `createApplyDeps` | the `--apply` / `--undo` engine, for hosts that confirm in their own UI |
 
-Every function takes an optional `runner`, `fs`, `env`, `home`, `distro`, `shell`, `mountRoot`, `wslExe`, `timeoutMs`, so tests can fake the machine. Functions return data and throw nothing for a bad machine; only the CLI exits. `runApply` and `runUndo` write, and are the only exports that do.
+Every function takes an optional `runner`, `fs`, `env`, `home`, `distro`, `shell`, `mountRoot`, `wslExe`, `timeoutMs`, so tests can fake the machine. Functions return data and throw nothing for a bad machine. Only the CLI exits. `runApply` and `runUndo` write, and are the only exports that do.
 
 ## `--preflight`
 
@@ -228,17 +225,29 @@ wsl-shadow --preflight --json              # { exitCode, view, pathPrefix, probl
 
 The prefix is the directory of each tool's Linux build, using `~/.nvm/current/bin` when it exists. Use the absolute path or a `/usr/local/bin` link to call wsl-shadow itself from `exec`.
 
-Wiring, by harness. These are the generic patterns; none was run inside that harness yet:
+Wiring, by harness. These are the generic patterns. None was run inside that harness yet:
 
-- **Cursor, Kilo** (MCP servers via `wsl.exe`): `"command": "wsl.exe", "args": ["-e", "sh", "-c", "PATH=\"$(/usr/local/bin/wsl-shadow --preflight):$PATH\" exec npx -y your-server"]`.
-- **Codex** (`[mcp_servers.x]` in `config.toml`): the same `command` and `args`. For its shell tool, call `wsl-shadow --preflight` first and stop on a non-zero exit.
-- **Claude Code**: run `wsl-shadow --preflight || exit 1` in whatever script or hook starts the session, and export the printed prefix into its PATH.
-
-Not measured: WSL1, Alpine, which launch form each harness uses, arm64 binary on hardware, `--apply` with a real interactive `sudo` prompt (the lab run used a stand-in), `--preflight` inside each harness.
+- Cursor, Kilo (MCP servers via `wsl.exe`): `"command": "wsl.exe", "args": ["-e", "sh", "-c", "PATH=\"$(/usr/local/bin/wsl-shadow --preflight):$PATH\" exec npx -y your-server"]`.
+- Codex (`[mcp_servers.x]` in `config.toml`): the same `command` and `args`. For its shell tool, call `wsl-shadow --preflight` first and stop on a non-zero exit.
+- Claude Code: run `wsl-shadow --preflight || exit 1` in whatever script or hook starts the session, and export the printed prefix into its PATH.
 
 ## For agents
 
-Paste `AGENTS-SNIPPET.md` into `AGENTS.md`, or load `skill/wsl-shadow/SKILL.md`. Both say: run `wsl-shadow --json --view=here` before trusting `node`, `npm`, `bun` or `claude`; you may suggest `wsl-shadow --apply`, but ask the user before running it, and never edit shell rc files or `/usr/local/bin` yourself.
+Paste `AGENTS-SNIPPET.md` into `AGENTS.md`, or load `skill/wsl-shadow/SKILL.md`. Both say: run `wsl-shadow --json --view=here` before trusting `node`, `npm`, `bun` or `claude`. You may suggest `wsl-shadow --apply`, but ask the user before running it, and never edit shell rc files or `/usr/local/bin` yourself.
+
+## Limits
+
+- Not measured: WSL1, Alpine, which launch form each harness uses, arm64 binary on hardware, `--apply` with a real interactive `sudo` prompt (the lab run used a stand-in), `--preflight` inside each harness.
+- Never touched: `/etc/wsl.conf`, `.wslconfig`, `/etc/profile`, `/etc/environment`, `~/.bashrc`, `WSLENV`, the Windows PATH, `System32`, anything under `/mnt/<drive>/`, or anything it did not create. It never runs `wsl --shutdown` and does not install nvm, Node, Bun or `claude`.
+- `--mcp` never edits config files.
+
+## Reported elsewhere
+
+- [openai/codex#20810](https://github.com/openai/codex/issues/20810): `node` missing, `npm` under `/mnt/c/.../fnm/`.
+- [GitNexus#1220](https://github.com/abhigyanpatwari/GitNexus/issues/1220): interactive `which` is Linux. `wsl bash -lc` runs the Windows shim.
+- [Kilo#8129](https://github.com/Kilo-Org/kilocode/issues/8129): the agent shell skips `.bashrc` and gets Windows npm.
+- [pi#1756](https://github.com/earendil-works/pi/issues/1756): `spawnSync("npm")` and the shell `npm` disagree. `npm root -g` returns `C:\`.
+- [agent-girl f184807](https://github.com/KenKaiii/agent-girl/commit/f1848071ee26fe8f7ca1b66d6729a95681518106): the launcher detects Windows Bun and installs a Linux one.
 
 ## Contributing
 
@@ -276,7 +285,7 @@ bunx jsr publish --dry-run
 
 ## License
 
-[AGPL-3.0-only](https://www.gnu.org/licenses/agpl-3.0.html). Free and open source. If you ship a modified version, or run a modified version as a network service, you must publish that source under the AGPL. Closed-source or proprietary commercial use needs a separate license from the author (dual licensing); ask via GitHub.
+[AGPL-3.0-only](https://www.gnu.org/licenses/agpl-3.0.html). Free and open source. If you ship a modified version, or run a modified version as a network service, you must publish that source under the AGPL. Closed-source or proprietary commercial use needs a separate license from the author (dual licensing). Ask via GitHub.
 
 The name `wsl-shadow` is not licensed for use by forks or derived products without permission.
 
